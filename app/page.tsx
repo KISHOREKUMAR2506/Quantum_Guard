@@ -12,8 +12,8 @@ import {
   YAxis,
 } from "recharts";
 
+import { onValue, ref } from "firebase/database";
 import { db } from "../firebaseConfig";
-import { ref, onValue } from "firebase/database";
 
 // Types
 interface RadiationData {
@@ -115,7 +115,7 @@ const GammaRaysDashboard: React.FC = () => {
     );
 
     return () => {
-      console.log("🔥 Cleaning up Firebase listener");
+      console.log("Cleaning up Firebase listener");
       unsubscribe();
     };
   }, []);
@@ -242,7 +242,12 @@ const GammaRaysDashboard: React.FC = () => {
             `}
             >
               {typeof value === "number" 
-                ? (value < 1 ? value.toFixed(6) : value.toLocaleString())
+                ? (value < 0.000001 
+                    ? value.toExponential(2) // Use scientific notation for very small numbers
+                    : value < 1 
+                      ? value.toFixed(6)
+                      : value.toLocaleString()
+                  )
                 : value
               }
             </span>
@@ -310,7 +315,7 @@ const GammaRaysDashboard: React.FC = () => {
                 }`}
               ></div>
               <span className="text-sm text-gray-300">
-                {isConnected ? "Connected to Firebase" : "Connecting..."}
+                {isConnected ? "Connected" : "Connecting..."}
               </span>
             </div>
 
@@ -493,48 +498,187 @@ const GammaRaysDashboard: React.FC = () => {
 
         {/* Data Summary */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-600">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-              <Zap className="w-5 h-5 mr-2 text-yellow-400" />
-              Current Reading Summary
-            </h3>
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-gray-300">Counts Per Second:</span>
-                <span className="text-white font-mono">{data.CPS} CPS</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Counts Per Minute:</span>
-                <span className="text-white font-mono">{data.CPM} CPM</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Dose Rate:</span>
-                <span className={`font-mono ${isDangerous ? 'text-red-400' : 'text-green-400'}`}>
-                  {data.Dose_uSv} µSv/h
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Activity (Curie):</span>
-                <span className="text-white font-mono">{data.Activity_Ci} Ci</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-300">Activity (Becquerel):</span>
-                <span className="text-white font-mono">{data.Activity_Bq} Bq</span>
+          <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-xl p-6 shadow-2xl border border-slate-600 relative overflow-hidden">
+            {/* Background decoration */}
+            <div className="absolute inset-0 opacity-5">
+              <div className="absolute top-0 right-0 w-32 h-32 bg-yellow-400 rounded-full -translate-y-16 translate-x-16 blur-2xl"></div>
+              <div className="absolute bottom-0 left-0 w-32 h-32 bg-blue-400 rounded-full translate-y-16 -translate-x-16 blur-2xl"></div>
+            </div>
+
+            <div className="relative z-10">
+              <h3 className="text-xl font-bold text-white mb-6 flex items-center">
+                <Zap className="w-6 h-6 mr-3 text-yellow-400" />
+                Current Reading Summary
+              </h3>
+
+              <div className="grid gap-4">
+                {/* CPS Reading */}
+                <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-500 hover:border-blue-400 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
+                      <span className="text-gray-300 text-sm">Counts Per Second</span>
+                    </div>
+                    <span className="text-white font-mono text-lg font-bold">{data.CPS} <span className="text-xs text-gray-400">CPS</span></span>
+                  </div>
+                </div>
+
+                {/* CPM Reading */}
+                <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-500 hover:border-blue-400 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse"></div>
+                      <span className="text-gray-300 text-sm">Counts Per Minute</span>
+                    </div>
+                    <span className="text-white font-mono text-lg font-bold">{data.CPM} <span className="text-xs text-gray-400">CPM</span></span>
+                  </div>
+                </div>
+
+                {/* Dose Rate */}
+                <div className={`bg-slate-700/50 p-4 rounded-lg border ${isDangerous ? 'border-red-500 hover:border-red-400' : 'border-green-500 hover:border-green-400'} transition-colors`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <div className={`w-2 h-2 ${isDangerous ? 'bg-red-400' : 'bg-green-400'} rounded-full animate-pulse`}></div>
+                      <span className="text-gray-300 text-sm">Dose Rate</span>
+                    </div>
+                    <span className={`font-mono text-lg font-bold ${isDangerous ? 'text-red-400' : 'text-green-400'}`}>
+                      {data.Dose_uSv} <span className="text-xs text-gray-400">µSv/h</span>
+                    </span>
+                  </div>
+                </div>
+
+                {/* Activity Readings */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-500 hover:border-blue-400 transition-colors">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-indigo-400 rounded-full"></div>
+                        <span className="text-gray-300 text-sm">Activity (Ci)</span>
+                      </div>
+                      <span className="text-white font-mono text-lg font-bold block">{data.Activity_Ci} <span className="text-xs text-gray-400">Ci</span></span>
+                    </div>
+                  </div>
+
+                  <div className="bg-slate-700/50 p-4 rounded-lg border border-slate-500 hover:border-blue-400 transition-colors">
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <div className="w-2 h-2 bg-cyan-400 rounded-full"></div>
+                        <span className="text-gray-300 text-sm">Activity (Bq)</span>
+                      </div>
+                      <span className="text-white font-mono text-lg font-bold block">{data.Activity_Bq} <span className="text-xs text-gray-400">Bq</span></span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="bg-slate-800 rounded-xl p-6 border border-slate-600">
-            <h3 className="text-lg font-bold text-white mb-4 flex items-center">
-              <Shield className="w-5 h-5 mr-2 text-blue-400" />
-              Safety Information
-            </h3>
-            <div className="space-y-2 text-sm text-gray-300">
-              <p>• Normal background radiation: 0.1-0.5 µSv/h</p>
-              <p>• Alert threshold: {RADIATION_DANGER_THRESHOLD} µSv/h</p>
-              <p>• Current status: <span className={isDangerous ? 'text-red-400 font-bold' : 'text-green-400 font-bold'}>{statusText}</span></p>
-              <p>• Data source: Firebase Realtime Database</p>
-              <p>• Update frequency: Real-time</p>
+          <div className="mt-6 p-6 bg-gradient-to-br from-slate-800 to-slate-700 rounded-xl shadow-2xl border border-slate-600">
+            <h2 className="text-2xl font-bold mb-6 text-white flex items-center justify-center">
+              <Shield className="w-8 h-8 mr-3 text-blue-400" />
+              Safety Status & User Guidance
+            </h2>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Status and Levels Card */}
+              <div className="bg-gradient-to-br from-slate-700/80 to-slate-700/40 p-6 rounded-xl border-2 border-blue-500/30 hover:border-blue-400/50 transition-all duration-300 shadow-lg">
+                <div className="flex items-center mb-4">
+                  <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center mr-3">
+                    <span className="text-2xl">📊</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-blue-300">Radiation Status</h3>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Current Level Indicator */}
+                  <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-600">
+                    <div className="flex justify-between items-center mb-2">
+                      <span className="text-gray-300">Current Level:</span>
+                      <span className="text-white font-mono text-lg">{data.Dose_uSv} µSv/h</span>
+                    </div>
+                    <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                      <div 
+                        className={`h-full transition-all duration-500 ${
+                          isDangerous ? 'bg-red-500' : 'bg-green-500'
+                        }`}
+                        style={{ width: `${Math.min((data.Dose_uSv / 5) * 100, 100)}%` }}
+                      ></div>
+                    </div>
+                  </div>
+
+                  {/* Level Indicators */}
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-green-900/20 p-3 rounded-lg border border-green-500/30">
+                      <div className="flex items-center mb-1">
+                        <div className="w-2 h-2 rounded-full bg-green-400 mr-2"></div>
+                        <span className="text-green-300 text-sm">Safe</span>
+                      </div>
+                      <span className="text-white text-xs">{'<'} 2.0 µSv/h</span>
+                    </div>
+                    <div className="bg-yellow-900/20 p-3 rounded-lg border border-yellow-500/30">
+                      <div className="flex items-center mb-1">
+                        <div className="w-2 h-2 rounded-full bg-yellow-400 mr-2"></div>
+                        <span className="text-yellow-300 text-sm">Alert</span>
+                      </div>
+                      <span className="text-white text-xs">2.0 - 5.0 µSv/h</span>
+                    </div>
+                    <div className="bg-red-900/20 p-3 rounded-lg border border-red-500/30">
+                      <div className="flex items-center mb-1">
+                        <div className="w-2 h-2 rounded-full bg-red-400 mr-2"></div>
+                        <span className="text-red-300 text-sm">Danger</span>
+                      </div>
+                      <span className="text-white text-xs">{'>'}5.0 µSv/h</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Emergency Response Card */}
+              <div className="bg-gradient-to-br from-slate-700/80 to-slate-700/40 p-6 rounded-xl border-2 border-red-500/30 hover:border-red-400/50 transition-all duration-300 shadow-lg">
+                <div className="flex items-center mb-4">
+                  {/* <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center mr-3">
+                    <span className="text-2xl">🚨</span>
+                  </div>
+                  <h3 className="text-xl font-bold text-red-300">Emergency Response</h3> */}
+                </div>
+
+                {/* Quick Actions */}
+                <div className="space-y-4">
+                  {isDangerous ? (
+                    <div className="bg-red-900/30 p-4 rounded-lg border border-red-500/50 animate-pulse">
+                      <div className="flex items-center mb-2">
+                        <AlertTriangle className="w-5 h-5 text-red-400 mr-2" />
+                        <span className="text-red-300 font-bold">IMMEDIATE ACTION REQUIRED</span>
+                      </div>
+                      <ol className="list-decimal list-inside space-y-2 text-red-100 text-sm pl-2">
+                        <li>Evacuate area immediately</li>
+                        <li>Follow emergency exit signs</li>
+                        <li>Call emergency response</li>
+                      </ol>
+                    </div>
+                  ) : (
+                    <div className="bg-green-900/30 p-4 rounded-lg border border-green-500/50">
+                      <div className="flex items-center mb-2">
+                        <Shield className="w-5 h-5 text-green-400 mr-2" />
+                        <span className="text-green-300 font-bold">NORMAL OPERATIONS</span>
+                      </div>
+                      <p className="text-green-100 text-sm">All radiation levels are within safe parameters.</p>
+                    </div>
+                  )}
+
+                  {/* Emergency Contacts */}
+                  <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-600">
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <p className="text-red-300 font-bold">Emergency Hotline</p>
+                        <p className="text-white font-mono">📞 1800-1800-1800</p>
+                      </div>
+                      <div className="bg-red-500/20 px-3 py-1 rounded-full">
+                        <span className="text-red-300 text-sm">24/7</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -542,13 +686,10 @@ const GammaRaysDashboard: React.FC = () => {
         {/* Footer */}
         <div className="mt-12 text-center text-gray-400">
           <p className="text-xs md:text-sm">
-            Gamma Rays Detection and Alert System • Real-time monitoring • Powered by Firebase Realtime Database
+            Gamma Rays Detection and Alert System • Powered by Firebase Realtime Database
           </p>
           <p className="text-xs mt-2">
             Last updated: {lastUpdate ? lastUpdate.toLocaleString() : 'Waiting for data...'}
-          </p>
-          <p className="text-xs mt-1">
-            Firebase path: geiger_data • Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
           </p>
         </div>
       </div>

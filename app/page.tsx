@@ -1,5 +1,4 @@
 "use client";
-
 import { Activity, AlertTriangle, Radio, Shield, Zap } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import {
@@ -13,9 +12,10 @@ import {
   YAxis,
 } from "recharts";
 
-// Types
-type IntervalType = number;  // For browser environments
+import { db } from "../firebaseConfig";
+import { ref, onValue } from "firebase/database";
 
+// Types
 interface RadiationData {
   CPS: number;
   CPM: number;
@@ -41,30 +41,7 @@ interface InfoCardProps {
 
 // Constants
 const RADIATION_DANGER_THRESHOLD = 2.0;
-const UPDATE_INTERVAL = 2000;
 const MAX_CHART_POINTS = 20;
-
-// Mock data generator with error handling
-const createMockData = (): RadiationData => {
-  try {
-    return {
-      CPS: Math.floor(Math.random() * 100) + 50,
-      CPM: Math.floor(Math.random() * 6000) + 3000,
-      Dose_uSv: parseFloat((Math.random() * 3).toFixed(3)),
-      Activity_Ci: parseFloat((Math.random() * 0.001).toFixed(6)),
-      Activity_Bq: Math.floor(Math.random() * 1000) + 500
-    };
-  } catch (error) {
-    console.error('Error generating mock data:', error);
-    return {
-      CPS: 0,
-      CPM: 0,
-      Dose_uSv: 0,
-      Activity_Ci: 0,
-      Activity_Bq: 0
-    };
-  }
-};
 
 const GammaRaysDashboard: React.FC = () => {
   // States
@@ -83,57 +60,86 @@ const GammaRaysDashboard: React.FC = () => {
   // Refs
   const alertRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<(HTMLDivElement | null)[]>([]);
-  const updateInterval = useRef<IntervalType | null>(null);
 
-  // Setup and cleanup effect
+  // Firebase real-time data listener
   useEffect(() => {
-    let isMounted = true;
+    console.log("🔥 Setting up Firebase listener...");
+    
+    const sensorRef = ref(db, "geiger_data"); // Updated to match your Firebase structure
 
-    const updateData = () => {
-      try {
-        const newData = createMockData();
-        if (isMounted) {
-          setData(newData);
-          setLastUpdate(new Date());
-          setIsConnected(true);
-          setError(null);
+    const unsubscribe = onValue(
+      sensorRef,
+      (snapshot) => {
+        try {
+          if (snapshot.exists()) {
+            const newData = snapshot.val() as RadiationData;
+            console.log("📡 New Firebase Data:", newData);
 
-          setChartData(prev => {
-            const newEntry: ChartDataPoint = {
-              time: new Date().toLocaleTimeString(),
-              uSvph: newData.Dose_uSv,
-              timestamp: Date.now(),
+            // Validate data structure
+            const validatedData: RadiationData = {
+              CPS: typeof newData.CPS === 'number' ? newData.CPS : 0,
+              CPM: typeof newData.CPM === 'number' ? newData.CPM : 0,
+              Dose_uSv: typeof newData.Dose_uSv === 'number' ? newData.Dose_uSv : 0,
+              Activity_Ci: typeof newData.Activity_Ci === 'number' ? newData.Activity_Ci : 0,
+              Activity_Bq: typeof newData.Activity_Bq === 'number' ? newData.Activity_Bq : 0,
             };
-            return [...prev, newEntry].slice(-MAX_CHART_POINTS);
-          });
-        }
-      } catch (err) {
-        if (isMounted) {
-          const errorMessage = err instanceof Error ? err.message : 'Failed to update data';
-          console.error('Update error:', errorMessage);
+
+            setData(validatedData);
+            setLastUpdate(new Date());
+            setError(null);
+
+            // Update chart data
+            setChartData((prev) => {
+              const newEntry: ChartDataPoint = {
+                time: new Date().toLocaleTimeString(),
+                uSvph: validatedData.Dose_uSv,
+                timestamp: Date.now(),
+              };
+              return [...prev, newEntry].slice(-MAX_CHART_POINTS);
+            });
+          } else {
+            console.log("No data available in Firebase");
+            setError("No data available from sensor");
+          }
+        } catch (err) {
+          const errorMessage = err instanceof Error ? err.message : 'Failed to process Firebase data';
+          console.error("Firebase data processing error:", errorMessage);
           setError(errorMessage);
-          setIsConnected(false);
         }
+      },
+      (error) => {
+        console.error("Firebase connection error:", error);
+        setError(`Firebase error: ${error.message}`);
+        setIsConnected(false);
       }
-    };
-
-    // Initial update
-    updateData();
-
-    // Set up interval
-    const intervalId = window.setInterval(updateData, UPDATE_INTERVAL);
-    updateInterval.current = intervalId;
+    );
 
     return () => {
-      isMounted = false;
-      if (updateInterval.current) {
-        window.clearInterval(updateInterval.current);
-        updateInterval.current = null;
-      }
+      console.log("🔥 Cleaning up Firebase listener");
+      unsubscribe();
     };
   }, []);
 
-  // Card animations
+  // Firebase connection status listener
+  useEffect(() => {
+    const connectedRef = ref(db, ".info/connected");
+    
+    const unsubscribe = onValue(connectedRef, (snapshot) => {
+      const connected = snapshot.val();
+      console.log("Firebase connection status:", connected);
+      setIsConnected(connected === true);
+      
+      if (!connected) {
+        setError("Lost connection to Firebase");
+      } else if (connected && error?.includes("Firebase")) {
+        setError(null);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [error]);
+
+  // Card entrance animations
   useEffect(() => {
     const timeouts: number[] = [];
 
@@ -159,7 +165,7 @@ const GammaRaysDashboard: React.FC = () => {
     };
   }, []);
 
-  // Alert animation
+  // Alert animation effect
   useEffect(() => {
     if (!alertRef.current) return;
 
@@ -254,13 +260,23 @@ const GammaRaysDashboard: React.FC = () => {
 
   InfoCard.displayName = 'InfoCard';
 
-  if (error) {
+  // Error state
+  if (error && !isConnected) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900">
-        <div className="text-red-400 text-center p-6">
-          <AlertTriangle className="w-12 h-12 mx-auto mb-4" />
-          <h2 className="text-xl font-bold mb-2">Error</h2>
-          <p>{error}</p>
+        <div className="text-center p-6 max-w-md">
+          <AlertTriangle className="w-16 h-16 mx-auto mb-4 text-red-400" />
+          <h2 className="text-2xl font-bold mb-4 text-white">Connection Error</h2>
+          <div className="bg-red-900/20 border border-red-500 rounded-lg p-4 mb-4">
+            <p className="text-red-400 text-sm">{error}</p>
+          </div>
+          <div className="text-gray-400 text-sm">
+            <p>Checking Firebase connection...</p>
+            <div className="flex items-center justify-center mt-2">
+              <div className="w-2 h-2 bg-red-400 rounded-full animate-ping"></div>
+              <span className="ml-2">Reconnecting...</span>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -308,6 +324,13 @@ const GammaRaysDashboard: React.FC = () => {
               {statusText}
             </div>
           </div>
+
+          {/* Error banner */}
+          {error && isConnected && (
+            <div className="bg-yellow-900/20 border border-yellow-500 rounded-lg p-3 mb-4 max-w-2xl mx-auto">
+              <p className="text-yellow-400 text-sm">⚠️ {error}</p>
+            </div>
+          )}
         </div>
 
         {/* Alert Messages */}
@@ -336,7 +359,7 @@ const GammaRaysDashboard: React.FC = () => {
                   ></div>
                 </div>
                 <p className="text-white font-bold text-center">
-                  Current: {data.Dose_uSv} µSv/h • Danger threshold: 2.0 µSv/h
+                  Current: {data.Dose_uSv} µSv/h • Danger threshold: {RADIATION_DANGER_THRESHOLD} µSv/h
                 </p>
               </div>
             </div>
@@ -396,66 +419,75 @@ const GammaRaysDashboard: React.FC = () => {
         <div className="bg-gradient-to-br from-slate-800 to-slate-700 rounded-2xl p-6 md:p-8 shadow-2xl border border-slate-600">
           <h2 className="text-xl md:text-2xl font-bold text-white mb-6 flex items-center">
             <Activity className="w-5 h-5 md:w-6 md:h-6 mr-3 text-blue-400" />
-            Radiation Levels Over Time (Last 20 Readings)
+            Radiation Levels Over Time (Last {MAX_CHART_POINTS} Readings)
           </h2>
 
-          <div className="h-64 md:h-80 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={chartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                <XAxis 
-                  dataKey="time" 
-                  stroke="#9CA3AF" 
-                  fontSize={11}
-                  angle={-45}
-                  textAnchor="end"
-                  height={60}
-                />
-                <YAxis
-                  stroke="#9CA3AF"
-                  fontSize={11}
-                  label={{
-                    value: "µSv/h",
-                    angle: -90,
-                    position: "insideLeft",
-                    style: { textAnchor: "middle", fill: "#9CA3AF" },
-                  }}
-                />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "#1F2937",
-                    border: "1px solid #374151",
-                    borderRadius: "8px",
-                    color: "#F3F4F6",
-                  }}
-                  labelStyle={{ color: "#9CA3AF" }}
-                />
-                <Legend />
-                <Line
-                  type="monotone"
-                  dataKey="uSvph"
-                  stroke="#3B82F6"
-                  strokeWidth={3}
-                  dot={{ fill: "#3B82F6", strokeWidth: 2, r: 3 }}
-                  activeDot={{ r: 5, fill: "#60A5FA" }}
-                  name="Dose Rate (µSv/h)"
-                />
-                {/* Danger threshold line */}
-                <Line
-                  type="monotone"
-                  dataKey={() => 2.0}
-                  stroke="#EF4444"
-                  strokeWidth={2}
-                  strokeDasharray="5 5"
-                  dot={false}
-                  name="Danger Threshold (2.0 µSv/h)"
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          {chartData.length === 0 ? (
+            <div className="h-64 md:h-80 w-full flex items-center justify-center">
+              <div className="text-center text-gray-400">
+                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" />
+                <p>Waiting for data...</p>
+              </div>
+            </div>
+          ) : (
+            <div className="h-64 md:h-80 w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
+                  <XAxis 
+                    dataKey="time" 
+                    stroke="#9CA3AF" 
+                    fontSize={11}
+                    angle={-45}
+                    textAnchor="end"
+                    height={60}
+                  />
+                  <YAxis
+                    stroke="#9CA3AF"
+                    fontSize={11}
+                    label={{
+                      value: "µSv/h",
+                      angle: -90,
+                      position: "insideLeft",
+                      style: { textAnchor: "middle", fill: "#9CA3AF" },
+                    }}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: "#1F2937",
+                      border: "1px solid #374151",
+                      borderRadius: "8px",
+                      color: "#F3F4F6",
+                    }}
+                    labelStyle={{ color: "#9CA3AF" }}
+                  />
+                  <Legend />
+                  <Line
+                    type="monotone"
+                    dataKey="uSvph"
+                    stroke="#3B82F6"
+                    strokeWidth={3}
+                    dot={{ fill: "#3B82F6", strokeWidth: 2, r: 3 }}
+                    activeDot={{ r: 5, fill: "#60A5FA" }}
+                    name="Dose Rate (µSv/h)"
+                  />
+                  {/* Danger threshold line */}
+                  <Line
+                    type="monotone"
+                    dataKey={() => RADIATION_DANGER_THRESHOLD}
+                    stroke="#EF4444"
+                    strokeWidth={2}
+                    strokeDasharray="5 5"
+                    dot={false}
+                    name={`Danger Threshold (${RADIATION_DANGER_THRESHOLD} µSv/h)`}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
           <div className="mt-4 text-xs md:text-sm text-gray-400 text-center">
-            * Red dashed line indicates the danger threshold (2.0 µSv/h)
+            * Red dashed line indicates the danger threshold ({RADIATION_DANGER_THRESHOLD} µSv/h)
           </div>
         </div>
 
@@ -485,6 +517,10 @@ const GammaRaysDashboard: React.FC = () => {
                 <span className="text-gray-300">Activity (Curie):</span>
                 <span className="text-white font-mono">{data.Activity_Ci} Ci</span>
               </div>
+              <div className="flex justify-between">
+                <span className="text-gray-300">Activity (Becquerel):</span>
+                <span className="text-white font-mono">{data.Activity_Bq} Bq</span>
+              </div>
             </div>
           </div>
 
@@ -495,9 +531,10 @@ const GammaRaysDashboard: React.FC = () => {
             </h3>
             <div className="space-y-2 text-sm text-gray-300">
               <p>• Normal background radiation: 0.1-0.5 µSv/h</p>
-              <p>• Alert threshold: 2.0 µSv/h</p>
+              <p>• Alert threshold: {RADIATION_DANGER_THRESHOLD} µSv/h</p>
               <p>• Current status: <span className={isDangerous ? 'text-red-400 font-bold' : 'text-green-400 font-bold'}>{statusText}</span></p>
-              <p>• Data updates: Real-time via Firebase</p>
+              <p>• Data source: Firebase Realtime Database</p>
+              <p>• Update frequency: Real-time</p>
             </div>
           </div>
         </div>
@@ -508,7 +545,10 @@ const GammaRaysDashboard: React.FC = () => {
             Gamma Rays Detection and Alert System • Real-time monitoring • Powered by Firebase Realtime Database
           </p>
           <p className="text-xs mt-2">
-            Last updated: {lastUpdate ? lastUpdate.toLocaleString() : 'Never'}
+            Last updated: {lastUpdate ? lastUpdate.toLocaleString() : 'Waiting for data...'}
+          </p>
+          <p className="text-xs mt-1">
+            Firebase path: geiger_data • Status: {isConnected ? '🟢 Connected' : '🔴 Disconnected'}
           </p>
         </div>
       </div>

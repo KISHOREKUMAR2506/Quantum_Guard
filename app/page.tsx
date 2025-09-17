@@ -60,6 +60,7 @@ const GammaRaysDashboard: React.FC = () => {
   // Refs
   const alertRef = useRef<HTMLDivElement>(null);
   const cardsRef = useRef<(HTMLDivElement | null)[]>([]);
+  const alarmRef = useRef<HTMLAudioElement>(null);
 
   // Firebase real-time data listener
   useEffect(() => {
@@ -73,7 +74,7 @@ const GammaRaysDashboard: React.FC = () => {
         try {
           if (snapshot.exists()) {
             const newData = snapshot.val() as RadiationData;
-            console.log("📡 New Firebase Data:", newData);
+            console.log("New Firebase Data:", newData);
 
             // Validate data structure
             const validatedData: RadiationData = {
@@ -265,6 +266,18 @@ const GammaRaysDashboard: React.FC = () => {
 
   InfoCard.displayName = 'InfoCard';
 
+  // Warning sound effect
+  useEffect(() => {
+    if (isDangerous && alarmRef.current) {
+      alarmRef.current.play().catch(error => {
+        console.error("Error playing alarm sound:", error);
+      });
+    } else if (!isDangerous && alarmRef.current) {
+      alarmRef.current.pause();
+      alarmRef.current.currentTime = 0;
+    }
+  }, [isDangerous]);
+
   // Error state
   if (error && !isConnected) {
     return (
@@ -289,6 +302,12 @@ const GammaRaysDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white">
+      {/* Warning Sound */}
+      <audio
+        ref={alarmRef}
+        src="/warning-alarm.mp3"
+        loop
+      />
       {/* Background Effects */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none">
         <div className="absolute top-1/4 left-1/4 w-96 h-96 bg-blue-500 rounded-full opacity-10 blur-3xl animate-pulse"></div>
